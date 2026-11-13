@@ -1,12 +1,12 @@
 ---
 name: review-session
-description: Interactive PR review session. Use only when explicitly invoked as `/review-session <PR numbers or URLs>` (or `/review-session setup`). Fans out background subagents that draft a review per PR, then walks the PRs one at a time in the order given, discussing a few draft comments per round, posting each PR's review when it is closed, and ending with a retro that updates the user's review profile so future drafts fit them better.
+description: Interactive PR review session. Use only when explicitly invoked with a list of PRs (`/review-session <PRs>` in Claude Code, `$review-session <PRs>` in Codex), or with `setup`. Fans out separate drafting agents that draft a review per PR, then walks the PRs one at a time in the order given, discussing a few draft comments per round, posting each PR's review when it is closed, and ending with a retro that updates the user's review profile so future drafts fit them better.
 ---
 
 # review-session
 
-Review a list of PRs together with the user. Background subagents draft each
-review. You and the user go through each draft a few items at a time, discuss
+Review a list of PRs together with the user. Separate drafting agents draft
+each review. You and the user go through each draft a few items at a time, discuss
 the code, settle the comments, and post. At the end, a retro turns the user's
 feedback into lessons that make the next session's drafts better.
 
@@ -28,6 +28,41 @@ feedback into lessons that make the next session's drafts better.
 **Never edit files in `SKILL_DIR`.** They're replaced on every update. All
 learning goes into `PROFILE_DIR`.
 
+## Agent capabilities
+
+This skill works in any coding agent that can run shell commands. Two features
+vary between agents, so use the best option yours has:
+
+- **Drafting** (`drafting` in `config.json`). Ideally drafts never stop the user
+  from reading and asking questions.
+  - `background`: your agent can start subagents that run in the background
+    and notify you when they finish, as Claude Code's `Agent` tool does. This
+    is the preferred mode.
+  - `command`: run `drafter_command` from `config.json` once per PR, as a
+    background shell job (e.g. ending in `&`, or your shell tool's
+    background option). It's a template with `{{PROMPT_FILE}}` and
+    `{{OUT}}`. Write the filled-in prompt to `SESSION_DIR/<repo>-<n>.prompt.md`
+    first. Example drafters:
+    - `claude -p "$(cat {{PROMPT_FILE}})" --allowedTools "Bash(gh:*) Bash(git:*) Read Write" > /dev/null 2>&1`
+    - `codex exec "$(cat {{PROMPT_FILE}})" > /dev/null 2>&1`
+
+    Each drafter must have network access for `gh` and permission to write
+    `{{OUT}}`.
+  - `blocking`: your agent's subagents make you wait until all of them finish
+    (Codex's default). Make the first PR current *before* launching them, so
+    the user can read it while they run. Tell the user they can read along
+    but not chat until the drafts land.
+  - `inline`: no subagents at all. Draft the current PR yourself, following
+    `subagent.md`, before presenting it. Draft the next one after closing
+    this one.
+
+  If `drafting` isn't set, choose from the tools you actually have, record the
+  choice in `config.json`, and tell the user in one line.
+- **Structured questions.** Where this skill says *ask a structured question*,
+  use your agent's multiple-choice question tool if it has one (e.g. Claude
+  Code's `AskUserQuestion`). Otherwise ask in chat with numbered options, and
+  accept a number or free text as the answer.
+
 ## 0. Load the profile
 
 If `PROFILE_DIR/config.json` doesn't exist, or the argument is `setup`, follow
@@ -41,7 +76,9 @@ If `PROFILE_DIR/config.json` doesn't exist, or the argument is `setup`, follow
   "name": "Mona",
   "workflow": "local_checkout",
   "posting": "post_on_close",
-  "round_size": 4
+  "round_size": 4,
+  "drafting": "background",
+  "drafter_command": null
 }
 ```
 
@@ -88,14 +125,17 @@ need both for discussing and posting.
    - an empty `arrivals` list
 
    Name files `<repo>-<n>.*`. Two repos can share a PR number.
-4. Launch **one background subagent per PR**, all in one message (`Agent`,
-   `subagent_type: general-purpose`). The prompt is `SKILL_DIR/subagent.md` with
-   these filled in: `{{REPO}}`, `{{PR}}`, `{{OUT}}`, `{{SKILL_DIR}}`,
-   `{{PROFILE_DIR}}`, `{{USER}}` (github_user), `{{NAME}}`, and
-   `{{SESSION_PRS}}`, one line per PR as `owner/repo#N title`. The subagent
-   replies with one line only.
-5. In the same turn, make the **first PR in the user's list** current (§3), so
-   they can start reading while the drafts run. Tell them in one line: "N
+4. Make the **first PR in the user's list** current (§3), so they can start
+   reading while the drafts run.
+5. Start **one draft per PR**, all at once, using the `drafting` mode (see
+   Agent capabilities). The prompt is `SKILL_DIR/subagent.md` with these
+   filled in:
+   - `{{REPO}}`, `{{PR}}`, `{{OUT}}`
+   - `{{SKILL_DIR}}`, `{{PROFILE_DIR}}`
+   - `{{USER}}` (github_user) and `{{NAME}}`
+   - `{{SESSION_PRS}}`: one line per PR, as `owner/repo#N title`
+
+   Drafting agents reply with one line only. Tell the user in one line: "N
    reviews drafting. #X is ready to read; I'll present it when its draft
    lands."
 
@@ -104,15 +144,18 @@ need both for discussing and posting.
 - **The order is the order the user gave.** People often put the most
   important PR first. Never reorder by arrival time or relatedness. If they
   ask to skip ahead or reorder, do it.
-- When a subagent finishes, append `{pr, at}` to `arrivals`. **Never relay its
-  content.**
+- A draft has landed when its agent reports back or its review file appears.
+  If your drafts don't notify you (`command` mode), check `SESSION_DIR` for new
+  `*.review.md` files at the start of every reply. When a draft lands, append
+  `{pr, at}` to `arrivals`. **Never relay its content.**
   - If it's the current PR, present it. If the user is in the middle of a
     question, answer that first.
   - If it isn't, say only "#N draft ready", and say nothing while a round is in
     progress.
 - While the current PR's draft is pending, the user may read the code and ask
   questions. Answer them.
-- If a subagent fails, report it in one line and offer to retry it or to
+- If a draft fails, or a `command` draft has produced nothing after about 15
+  minutes, report it in one line and offer to retry it or to
   review that PR from scratch together.
 
 ## 3. Reviewing one PR
@@ -122,7 +165,7 @@ need both for discussing and posting.
 1. Run `gh pr view <n> -R <o>/<r> --json state,headRefOid,headRefName,url`. If
    the PR is merged or closed, say so in one line and offer to skip it.
 2. In `local_checkout` mode, run `gh pr checkout <n>` from inside that repo's
-   checkout. Do the `cd <dir>` as its own Bash call first. **Don't pass
+   checkout. Change into that directory as its own shell command first. **Don't pass
    `--detach`, and don't check out a bare commit.** Editor PR extensions only
    recognize the PR on the tracking branch that `gh pr checkout` creates. If
    the tree is dirty, stop and ask. Never stash or discard anyone's changes.
@@ -246,7 +289,7 @@ Log items the user never sees as `held_back`; the retro checks this cutoff.
    its first line. Then follow `posting`:
    - `post_on_close`: post right away unless the user objects in the same
      message.
-   - `confirm`: ask with one `AskUserQuestion` (**Post** / **Edit first**) and
+   - `confirm`: ask a structured question (**Post** / **Edit first**) and
      post only on a yes.
    - `pending_only`: add the comments to the pending review without
      submitting it. Tell the user the suggested verdict and that it's ready
@@ -279,7 +322,7 @@ Log items the user never sees as `held_back`; the retro checks this cutoff.
    If GitHub rejects an anchor, move that comment into the summary rather than
    dropping it. If something fails partway, stop and say exactly what was
    added. Never retry blindly, since that can duplicate comments.
-5. Ask the pulse question with one `AskUserQuestion`: "For #N, the amount I
+5. Ask the pulse question as a structured question: "For #N, the amount I
    raised was…" with **Too much / About right / Too little**. A note is
    optional.
 6. Append the PR's records to `SESSION_DIR/log.jsonl` and mark the PR done.

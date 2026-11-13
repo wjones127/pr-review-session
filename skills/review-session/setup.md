@@ -10,7 +10,10 @@ voice pass, then straight into reviewing.
 - Get the login with `gh api user --jq .login`, and a display name from
   `gh api user --jq .name`. If there's no name, use the login.
 
-## 2. Ask (one `AskUserQuestion` call, four questions)
+## 2. Ask (one structured question with four parts)
+
+See *Agent capabilities* in `SKILL.md` for what a structured question is in
+your agent.
 
 1. **Comment style.** "How do you like your review comments formatted?"
    - **Conventional comments**: labels such as `issue(blocking):` and
@@ -42,8 +45,10 @@ voice pass, then straight into reviewing.
 Create `PROFILE_DIR` with `log/` and `sessions/` subfolders, and add:
 
 - `config.json`: `github_user`, `name`, `workflow` (`local_checkout` or
-  `browser`), `posting` (`post_on_close`, `confirm`, or `pending_only`), and
-  `round_size: 4`.
+  `browser`), `posting` (`post_on_close`, `confirm`, or `pending_only`),
+  `round_size: 4`, and `drafting`, chosen from the tools you actually have
+  (see *Agent capabilities* in `SKILL.md`). Tell the user which drafting mode
+  you picked in one line.
 - `standard.md`: copied from `SKILL_DIR/presets/standard.md`.
 - `comment-style.md`: copied from the chosen
   `SKILL_DIR/presets/comment-styles/*.md`, or written from their description.

@@ -37,7 +37,7 @@ have stopped.
 
 ## 3. Ask the user
 
-Use one `AskUserQuestion` with up to 3 questions. Ask about overall volume
+Ask one structured question with up to 3 parts. Ask about overall volume
 (too much / about right / too little) and anything the numbers can't show,
 such as "did the OTHERS items help?". Keep it light.
 

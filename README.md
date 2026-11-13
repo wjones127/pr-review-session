@@ -1,11 +1,13 @@
 # pr-review-session
 
-A [Claude Code](https://claude.com/claude-code) skill for **pair reviewing**
-pull requests with an agent. The agent doesn't review for you. It reviews
-alongside you.
+An agent skill for **pair reviewing** pull requests. It works in
+[Claude Code](https://claude.com/claude-code) and should work in
+[Codex](https://developers.openai.com/codex) or any agent that supports
+skills. The agent doesn't review for you. It reviews alongside you.
 
 ```
-/review-session 1234 1240 other-repo#88
+/review-session 1234 1240 other-repo#88     # Claude Code
+$review-session 1234 1240 other-repo#88     # Codex
 ```
 
 You stay the reviewer. You read the code, write your own comments, and decide
@@ -21,7 +23,7 @@ Automated review bots are shared, public agents. The whole team works with one
 bot, it posts on the PR under its own account, and you talk to it in PR
 threads that everyone can see. That's a useful job, but a different one.
 
-review-session runs on **your own agent**: the Claude Code you already use,
+review-session runs on **your own agent**: the coding agent you already use,
 with your tools, your memory, your local checkouts, and whatever else you've
 connected to it. It's there to help you think a PR through, not to take part
 in the PR's conversation.
@@ -43,7 +45,7 @@ concern.
 
 ## How it works
 
-- **Drafts in the background.** One subagent per PR drafts a review: a
+- **Drafts in the background.** One drafting agent per PR writes a review: a
   summary, ranked comments, and notes on what other reviewers already said.
   None of it floods your chat.
 - **You review in conversation.** The session goes through PRs in the order
@@ -67,11 +69,14 @@ concern.
 npx skills add wjones127/pr-review-session
 ```
 
-Update with `npx skills update`. Your profile lives outside the skill folder,
+Or copy `skills/review-session` into your agent's skills folder:
+`~/.claude/skills/` for Claude Code, `~/.agents/skills/` for Codex.
+
+Update with `npx skills update` (or by copying again). Your profile lives outside the skill folder,
 so updates never overwrite what it has learned.
 
 **Requirements:**
-- Claude Code
+- a coding agent that supports skills and can run shell commands
 - the [GitHub CLI](https://cli.github.com/) (`gh`), logged in with
   `gh auth login`
 
@@ -95,6 +100,34 @@ The first `/review-session` asks four quick questions:
    [example profile](skills/review-session/example-profiles/wjones127).
 
 Run `/review-session setup` to redo setup at any time.
+
+## Agent support
+
+| Agent | Status |
+|---|---|
+| Claude Code | Tested. Drafts run as background subagents. |
+| Codex | Untested. |
+| Others | Untested. Should work if the agent can run `gh`. |
+
+Drafting adapts to what your agent can do. The mode is saved as `drafting` in
+`config.json`:
+
+- `background`: subagents run in the background and report back. You can chat
+  while they work. (Claude Code)
+- `blocking`: subagents run, but the session waits for them. The first PR is
+  checked out first so you can read while you wait. (Codex's default)
+- `command`: the session runs `drafter_command` in the background for each PR,
+  e.g. `codex exec …` or `claude -p …`. This gives you background drafting in
+  any agent that can start background shell jobs.
+- `inline`: no subagents. The session drafts each PR itself just before
+  presenting it.
+
+If your agent has no multiple-choice question tool, questions come as
+numbered options in chat.
+
+**Codex:** the sandbox must allow network access (for `gh`) and writes to
+your profile folder, e.g. `--sandbox workspace-write` with network enabled,
+plus `~/.config/review-session` as a writable root.
 
 ## Your profile
 
@@ -121,7 +154,7 @@ anything you're comfortable sharing.
 
 For the local-checkout workflow, make a folder that holds a standalone
 checkout of each repo. Clones or `git worktree`s both work, but **not git
-submodules**. Open that folder in your editor and start Claude there:
+submodules**. Open that folder in your editor and start your agent there:
 
 ```
 ~/review/
